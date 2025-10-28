@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "naveen87422/jenkins-flask"
-        DOCKER_CREDENTIALS = "dockerhub-creds"
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKER_IMAGE = "${DOCKERHUB_CREDENTIALS_USR}/jenkins-flask"
     }
 
     stages {
@@ -13,27 +13,29 @@ pipeline {
             }
         }
 
-        stage('Install Dependencies & Test') {
+        stage('Install dependencies & Test') {
             steps {
-                sh 'python3 -m venv venv'
-                sh '. venv/bin/activate && pip install -r app/requirements.txt'
-                sh '. venv/bin/activate && pytest app/test_app.py'
+                sh '''
+                python3 -m pip install --upgrade pip
+                pip3 install -r app/requirements.txt
+                pytest -q app/test_app.py
+                '''
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${DOCKER_IMAGE}:${env.BUILD_NUMBER}")
+                    docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}", ".")
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push to DockerHub') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS}") {
-                        docker.image("${DOCKER_IMAGE}:${env.BUILD_NUMBER}").push()
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-creds') {
+                        docker.image("${DOCKER_IMAGE}:${BUILD_NUMBER}").push()
                     }
                 }
             }
@@ -41,19 +43,18 @@ pipeline {
 
         stage('Deploy Locally') {
             steps {
-                sh "docker run -d -p 5000:5000 ${DOCKER_IMAGE}:${env.BUILD_NUMBER}"
+                sh '''
+                docker stop flask-container || true
+                docker rm flask-container || true
+                docker run -d -p 5000:5000 --name flask-container ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                '''
             }
         }
     }
 
     post {
-        success {
-            echo '✅ Build, Test, Docker Push, and Deploy successful!'
-        }
-        failure {
-            echo '❌ Build failed. Check logs.'
-        }
+        success { echo "✅ Build & Deploy Successful!" }
+        failure { echo "❌ Build Failed!" }
     }
 }
-
 
