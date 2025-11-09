@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKER_IMAGE = "naveen87422/jenkins-flask"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Checking out code from GitHub..."
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies & Test') {
+            steps {
+                dir('app') {
+                    sh 'pip install -r requirements.txt'
+                    sh 'pytest --maxfail=1 --disable-warnings -q'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image..."
+                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Push to DockerHub') {
+            steps {
+                echo "Pushing Docker image to DockerHub..."
+                sh """
+                    echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                    docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    docker logout
+                """
+            }
+        }
+
+        stage('Deploy Locally') {
+            steps {
+                echo "Running the container locally..."
+                sh """
+                    docker run -d -p 5000:5000 --name flask-app-${BUILD_NUMBER} ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline completed successfully! Image pushed to DockerHub."
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs for errors."
+        }
+    }
+}
+
